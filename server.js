@@ -1,13 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const Parser = require('rss-parser');
+const axios = require('axios');
 
 const app = express();
-const parser = new Parser({
-    headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
-    }
-});
+const parser = new Parser();
 
 app.use(cors({ origin: '*' }));
 
@@ -22,11 +19,21 @@ app.get('/fetch-rss', async (req, res) => {
     }
 
     try {
-        // RSS XML ని నేరుగా JSON గా కన్వర్ట్ చేస్తుంది
-        const feed = await parser.parseURL(feedUrl);
+        // Block కాకుండా ఉండటానికి AllOrigins ప్రాక్సీ సహాయంతో XML తీసుకుంటాం
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
+        const response = await axios.get(proxyUrl, { timeout: 12000 });
+        
+        // ఆ XML ని JSON గా మార్చడం
+        const feed = await parser.parseString(response.data);
         res.json(feed);
     } catch (error) {
-        res.status(500).json({ error: 'RSS డేటా పార్స్ చేయడంలో విఫలమైంది', details: error.message });
+        // నేరుగా ట్రై చేసే Fallback
+        try {
+            const feed = await parser.parseURL(feedUrl);
+            res.json(feed);
+        } catch (err) {
+            res.status(500).json({ error: 'వార్తలు సేకరించడంలో విఫలమైంది', details: err.message });
+        }
     }
 });
 
