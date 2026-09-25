@@ -19,21 +19,19 @@ app.get('/fetch-rss', async (req, res) => {
     }
 
     try {
-        // Block కాకుండా ఉండటానికి AllOrigins ప్రాక్సీ సహాయంతో XML తీసుకుంటాం
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
-        const response = await axios.get(proxyUrl, { timeout: 12000 });
-        
-        // ఆ XML ని JSON గా మార్చడం
+        // బ్రౌజర్‌లా నటిస్తూ డైరెక్ట్ వెబ్‌సైట్ నుండి ఫీడ్ సేకరించడం
+        const response = await axios.get(feedUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            },
+            timeout: 10000
+        });
+
         const feed = await parser.parseString(response.data);
         res.json(feed);
     } catch (error) {
-        // నేరుగా ట్రై చేసే Fallback
-        try {
-            const feed = await parser.parseURL(feedUrl);
-            res.json(feed);
-        } catch (err) {
-            res.status(500).json({ error: 'వార్తలు సేకరించడంలో విఫలమైంది', details: err.message });
-        }
+        res.status(500).json({ error: 'డేటా తెలపడంలో విఫలమైంది', details: error.message });
     }
 });
 
