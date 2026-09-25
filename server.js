@@ -19,19 +19,19 @@ app.get('/fetch-rss', async (req, res) => {
     }
 
     try {
-        // బ్రౌజర్‌లా నటిస్తూ డైరెక్ట్ వెబ్‌సైట్ నుండి ఫీడ్ సేకరించడం
-        const response = await axios.get(feedUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            },
-            timeout: 10000
-        });
-
+        // ఆల్-ఒరిజిన్స్ బైపాస్ ద్వారా XML సేకరించడం
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(feedUrl)}`;
+        const response = await axios.get(proxyUrl, { timeout: 12000 });
         const feed = await parser.parseString(response.data);
         res.json(feed);
     } catch (error) {
-        res.status(500).json({ error: 'డేటా తెలపడంలో విఫలమైంది', details: error.message });
+        try {
+            // ఫాల్‌బ్యాక్: నేరుగా ప్రయత్నించడం
+            const feed = await parser.parseURL(feedUrl);
+            res.json(feed);
+        } catch (err) {
+            res.status(500).json({ error: 'వార్తలు సేకరించడంలో విఫలమైంది', details: err.message });
+        }
     }
 });
 
