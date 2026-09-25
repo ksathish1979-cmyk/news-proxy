@@ -5,7 +5,11 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
-// RSS ఫీడ్‌లను ఫెచ్ చేసే ఉచిత ప్రాక్సీ ఎండ్ పాయింట్
+// హెల్త్ చెక్ ఎండ్ పాయింట్ (సర్వర్‌ను నిద్ర లేపడానికి)
+app.get('/', (req, res) => {
+    res.send('News Proxy Server is Active!');
+});
+
 app.get('/fetch-rss', async (req, res) => {
     const feedUrl = req.query.url;
     if (!feedUrl) {
@@ -15,8 +19,10 @@ app.get('/fetch-rss', async (req, res) => {
     try {
         const response = await axios.get(feedUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            },
+            timeout: 15000 // 15 సెకన్ల వరకు వేచి చూస్తుంది
         });
         res.set('Content-Type', 'text/xml');
         res.send(response.data);
