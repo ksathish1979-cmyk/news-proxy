@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="ta">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>తమిళ దినపత్రికలు - లైవ్ న్యూస్ యాప్</title>
+  <style>
+    :root { --primary: #800000; --secondary: #1e293b; --bg: #f8fafc; --border: #cbd5e1; }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    body { background-color: var(--bg); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    header { background-color: var(--primary); color: white; padding: 0.8rem; text-align: center; font-weight: bold; font-size: 1.1rem; }
+    .app-layout { display: flex; flex: 1; height: calc(100vh - 50px); }
+
+    .sidebar { width: 220px; background-color: var(--secondary); display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+    .sidebar h3 { padding: 1rem; font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; border-bottom: 1px solid #334155; }
+
+    .nav-btn { padding: 1rem; color: #ffffff; background: none; border: none; text-align: left; font-size: 0.9rem; font-weight: 600; cursor: pointer; border-bottom: 1px solid #334155; transition: 0.2s; }
+    .nav-btn:hover, .nav-btn.active { background-color: var(--primary); color: white; }
+
+    .content-area { flex: 1; padding: 1.5rem; overflow-y: auto; position: relative; }
+    .paper-title { color: var(--primary); font-size: 1.2rem; margin-bottom: 1.2rem; border-bottom: 2px solid var(--primary); padding-bottom: 0.4rem; }
+
+    .news-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
+    .news-card { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .news-card h4 { color: var(--primary); margin-bottom: 0.6rem; font-size: 0.95rem; line-height: 1.4; }
+    .news-card p { font-size: 0.82rem; color: #475569; margin-bottom: 0.8rem; line-height: 1.4; }
+    .news-card button { background: var(--primary); color: white; border: none; padding: 0.5rem; border-radius: 4px; font-weight: bold; cursor: pointer; transition: 0.2s; }
+    .news-card button:hover { opacity: 0.9; }
+
+    .status-msg { text-align: center; padding: 2rem; color: #64748b; font-weight: bold; }
+
+    /* ఇన్-యాప్ రీడర్ మోడల్ పాపప్ */
+    .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.7); justify-content: center; align-items: center; z-index: 100; padding: 1rem; }
+    .modal.active { display: flex; }
+    .modal-box { background: white; width: 100%; max-width: 650px; max-height: 80vh; border-radius: 8px; padding: 1.5rem; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 10px 25px rgba(0,0,0,0.3); overflow-y: auto; }
+    .modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.8rem; }
+    .modal-header h3 { color: var(--primary); font-size: 1.1rem; padding-right: 1rem; line-height: 1.4; }
+    .close-btn { background: #ef4444; color: white; border: none; padding: 0.4rem 0.8rem; border-radius: 4px; font-weight: bold; cursor: pointer; flex-shrink: 0; }
+    .modal-body { font-size: 1rem; line-height: 1.6; color: #334155; margin-bottom: 1.5rem; }
+    .read-more-link { display: inline-block; background-color: var(--primary); color: white; text-decoration: none; padding: 0.6rem 1.2rem; border-radius: 4px; font-weight: bold; text-align: center; }
+  </style>
+</head>
+<body>
+
+  <header>తమిళ దినపత్రికలు - లైవ్ న్యూస్ రీడర్</header>
+
+  <div class="app-layout">
+    <div class="sidebar">
+      <h3>పత్రికలు</h3>
+      <button class="nav-btn active" onclick="fetchNews('https://news.google.com/rss?hl=ta&gl=IN&ceid=IN:ta', 'తాజా ముఖ్యాంశాలు', this)">తాజా ముఖ్యాంశాలు</button>
+      <button class="nav-btn" onclick="fetchNews('https://news.google.com/rss/search?q=site:dinamalar.com&hl=ta&gl=IN&ceid=IN:ta', 'Dinamalar', this)">Dinamalar</button>
+      <button class="nav-btn" onclick="fetchNews('https://news.google.com/rss/search?q=site:dailythanthi.com&hl=ta&gl=IN&ceid=IN:ta', 'Daily Thanthi', this)">Daily Thanthi</button>
+      <button class="nav-btn" onclick="fetchNews('https://news.google.com/rss/search?q=site:hindutamil.in&hl=ta&gl=IN&ceid=IN:ta', 'Hindu Tamil', this)">Hindu Tamil</button>
+      <button class="nav-btn" onclick="fetchNews('https://news.google.com/rss/search?q=site:dinamani.com&hl=ta&gl=IN&ceid=IN:ta', 'Dinamani', this)">Dinamani</button>
+    </div>
+
+    <div class="content-area">
+      <h2 class="paper-title" id="paperTitle">తాజా ముఖ్యాంశాలు</h2>
+      <div id="newsContainer" class="status-msg">వార్తలు లోడ్ అవుతున్నాయి...</div>
+
+      <!-- ఇన్-యాప్ రీడర్ పాపప్ -->
+      <div class="modal" id="newsModal">
+        <div class="modal-box">
+          <div>
+            <div class="modal-header">
+              <h3 id="modalTitle"></h3>
+              <button class="close-btn" onclick="closeModal()">✕ మూసివేయి</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+          </div>
+          <div id="modalFooter"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Renderలో deploy చేసిన మీ proxy URLను ఇక్కడ ఒక్కసారి మాత్రమే పెట్టాలి.
+    const PROXY_URL = "https://YOUR-RENDER-SERVICE.onrender.com";
+    let articles = [];
+
+    async function fetchNews(rssUrl, sourceName, btn) {
+      if (btn) {
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      }
+
+      document.getElementById('paperTitle').innerText = `${sourceName} - తాజా వార్తలు`;
+      const container = document.getElementById('newsContainer');
+      container.className = "status-msg";
+      container.innerText = "వార్తలు లోడ్ అవుతున్నాయి...";
+
+      try {
+        const response = await fetch(PROXY_URL + "/fetch-rss?url=" + encodeURIComponent(rssUrl));
+        if (!response.ok) throw new Error("వార్తల సర్వర్ స్పందించలేదు.");
+        const data = await response.json();
+
+        if (!data.items || data.items.length === 0) {
+          throw new Error("వార్తలు ఏవీ దొరకలేదు.");
+        }
+
+        articles = data.items;
+        let html = '<div class="news-grid">';
+
+        articles.forEach((item, i) => {
+          const title = item.title || "శీర్షిక లేదు";
+          let rawContent = item.contentSnippet || item.content || item.summary || title;
+          let tempDiv = document.createElement("div");
+          tempDiv.innerHTML = rawContent;
+          let cleanSnippet = (tempDiv.textContent || tempDiv.innerText || title).trim();
+
+          html += `
+            <div class="news-card">
+              <div>
+                <h4>
+                  <a href="javascript:void(0)" onclick="showDetails(${i}); return false;"
+                     style="color:inherit;text-decoration:none;">
+                    ${title}
+                  </a>
+                </h4>
+                <p>${cleanSnippet.substring(0, 85)}...</p>
+              </div>
+              <button onclick="showDetails(${i})">వివరాలు చూడండి 📖</button>
+            </div>
+          `;
+        });
+
+        html += '</div>';
+        container.className = "";
+        container.innerHTML = html;
+      } catch (err) {
+        container.className = "status-msg";
+        container.innerHTML = "లోపం: " + err.message;
+      }
+    }
+
+    async function showDetails(i) {
+      const item = articles[i];
+
+      if (!item || !item.link) return;
+
+      document.getElementById('modalTitle').innerText = item.title || "వార్త";
+
+      // Google News URLను browser-side iframeలో నేరుగా పెట్టడం లేదు.
+      // Proxy ముందుగా అసలు publisher URLను resolve చేసి,
+      // publisher pageను iframeలో అందిస్తుంది.
+      document.getElementById('modalBody').innerHTML = `
+        <div style="text-align:center;padding:12px;color:#64748b;">
+          వార్తను లోడ్ చేస్తోంది...
+        </div>
+        <iframe
+          id="newsFrame"
+          src="${PROXY_URL}/article?url=${encodeURIComponent(item.link)}"
+          style="width:100%;height:55vh;min-height:350px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;"
+          frameborder="0"
+          loading="eager"
+          title="వార్త">
+        </iframe>
+      `;
+
+      // iframe మాత్రమే ఉపయోగించాలి; Google News కొత్త tab తెరవకూడదు.
+      document.getElementById('modalFooter').innerHTML = '';
+
+      document.getElementById('newsModal').classList.add('active');
+    }
+
+    function closeModal() {
+      document.getElementById('newsModal').classList.remove('active');
+      document.getElementById('modalBody').innerHTML = '';
+      document.getElementById('modalFooter').innerHTML = '';
+    }
+
+    window.onload = () => {
+      const firstBtn = document.querySelector('.nav-btn');
+      fetchNews(
+        'https://news.google.com/rss?hl=ta&gl=IN&ceid=IN:ta',
+        'తాజా ముఖ్యాంశాలు',
+        firstBtn
+      );
+    };
+  </script>
+
+</body>
+</html>
