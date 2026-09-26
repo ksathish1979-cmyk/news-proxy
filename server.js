@@ -1,225 +1,218 @@
-const express = require("express");
-const cors = require("cors");
-const Parser = require("rss-parser");
-const { chromium } = require("playwright");
-const axios = require("axios");
-const cheerio = require("cheerio");
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const Parser = require('rss-parser');
+const { chromium } = require('playwright');
 
 const app = express();
-const parser = new Parser({ timeout: 30000 });
-const PORT = process.env.PORT || 10000;
 
-app.use(cors({ origin: "*" }));
+const parser = new Parser({
+  headers: {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36'
+  },
+  timeout: 15000
+});
 
-let browserPromise = null;
+app.use(cors());
 
-async function getBrowser() {
-  if (!browserPromise) {
-    browserPromise = chromium.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage"
-      ]
+/* =========================
+   RSS FEED
+========================= */
+
+app.get('/fetch-rss', async (req, res) => {
+  const rssUrl = req.query.url;
+
+  if (!rssUrl) {
+    return res.status(400).json({
+      error: 'RSS URL అవసరం'
     });
   }
-  return browserPromise;
-}
-
-async function resolveGoogleNewsUrl(googleUrl) {
-  if (!/news\.google\.com\/rss\/articles\//i.test(googleUrl)) {
-    return googleUrl;
-  }
-
-  const browser = await getBrowser();
-  const page = await browser.newPage({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-      "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36",
-    locale: "ta-IN"
-  });
 
   try {
-    await page.goto(googleUrl, {
-      waitUntil: "domcontentloaded",
+    const response = await axios.get(rssUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+        'Accept':
+          'application/rss+xml, application/xml, text/xml, */*'
+      },
+      timeout: 15000
+    });
+
+    const feed = await parser.parseString(response.data);
+
+    return res.json({
+      items: feed.items
+    });
+
+  } catch (err) {
+
+    console.error('RSS Error:', err.message);
+
+    return res.status(500).json({
+      error: 'RSS ఫీడ్ లోడ్ అవ్వలేదు',
+      details: err.message
+    });
+  }
+});
+
+
+/* =========================
+   GOOGLE NEWS → PUBLISHER URL
+========================= */
+
+app.get('/article', async (req, res) => {
+
+  const articleUrl = req.query.url;
+
+  if (!articleUrl) {
+    return res.status(400).send('Article URL అవసరం');
+  }
+
+  let browser;
+
+  try {
+
+    console.log('Original URL:', articleUrl);
+
+    browser = await chromium.launch({
+      headless: true
+    });
+
+    const page = await browser.newPage({
+      userAgent:
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36'
+    });
+
+    await page.goto(articleUrl, {
+      waitUntil: 'domcontentloaded',
       timeout: 30000
     });
 
-    // Google News performs the redirect in the browser.
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(3000);
 
     const finalUrl = page.url();
 
-    if (
-      finalUrl &&
-      !/news\.google\.com/i.test(finalUrl) &&
-      /^https?:\/\//i.test(finalUrl)
-    ) {
-      return finalUrl;
+    console.log('Publisher URL:', finalUrl);
+
+    await browser.close();
+    browser = null;
+
+    if (!finalUrl || finalUrl.includes('news.google.com')) {
+      return res.status(502).send(`
+        <html>
+        <body style="font-family:Arial;padding:30px;">
+        <h3>వార్త వెబ్‌సైట్ URL పొందలేకపోయాం</h3>
+        <p>Google News నుంచి అసలు publisher URL అందలేదు.</p>
+        </body>
+        </html>
+      `);
     }
 
-    // Some versions leave useful destination data in the rendered DOM.
-    const candidates = await page.evaluate(() => {
-      const out = [];
 
-      document.querySelectorAll("a[href]").forEach(a => {
-        const href = a.href;
-        if (
-          href &&
-          /^https?:\/\//i.test(href) &&
-          !/news\.google\.com/i.test(href) &&
-          !/google\./i.test(new URL(href).hostname)
-        ) {
-          out.push(href);
-        }
-      });
+    /* =========================
+       PUBLISHER PAGE DOWNLOAD
+    ========================= */
 
-      const canonical = document.querySelector('link[rel="canonical"]');
-      if (canonical && canonical.href) out.unshift(canonical.href);
-
-      const og = document.querySelector('meta[property="og:url"]');
-      if (og && og.content) out.unshift(og.content);
-
-      return [...new Set(out)];
-    });
-
-    for (const url of candidates) {
-      if (!/news\.google\.com/i.test(url)) return url;
-    }
-
-    throw new Error("Google News నుంచి అసలు publisher URL పొందలేకపోయాం.");
-  } finally {
-    await page.close();
-  }
-}
-
-function rewriteHtml(html, finalUrl) {
-  const $ = cheerio.load(html, { decodeEntities: false });
-
-  // Publisher CSP/X-Frame-Options headers cannot be controlled by us
-  // once the page is inside our response, but HTML CSP meta tags can.
-  $('meta[http-equiv]').each((_, el) => {
-    const v = String($(el).attr("http-equiv") || "").toLowerCase();
-    if (v === "content-security-policy" || v === "x-frame-options") {
-      $(el).remove();
-    }
-  });
-
-  // Make relative resources resolve against the publisher URL.
-  $("base").remove();
-  $("head").prepend(`<base href="${finalUrl}">`);
-
-  // Keep publisher links inside the iframe where possible.
-  $("a[target='_blank']").attr("target", "_self");
-
-  return $.html();
-}
-
-app.get("/", (req, res) => {
-  res.type("text").send("News iframe proxy is running.");
-});
-
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
-
-app.get("/fetch-rss", async (req, res) => {
-  try {
-    const rssUrl = req.query.url;
-    if (!rssUrl) return res.status(400).json({ error: "Missing url" });
-
-    const feed = await parser.parseURL(rssUrl);
-
-    res.json({
-      title: feed.title || "",
-      items: (feed.items || []).map(item => ({
-        title: item.title || "",
-        link: item.link || "",
-        pubDate: item.pubDate || item.isoDate || "",
-        contentSnippet: item.contentSnippet || "",
-        content: item.content || "",
-        summary: item.summary || ""
-      }))
-    });
-  } catch (e) {
-    res.status(502).json({
-      error: "RSS fetch failed",
-      details: e.message
-    });
-  }
-});
-
-app.get("/article", async (req, res) => {
-  try {
-    const googleUrl = req.query.url;
-    if (!googleUrl) return res.status(400).send("Missing article URL");
-
-    // Step 1: Google News wrapper -> real publisher URL.
-    const publisherUrl = await resolveGoogleNewsUrl(googleUrl);
-
-    if (/news\.google\.com/i.test(publisherUrl)) {
-      return res.status(409).send(
-        "<h3 style='font-family:Arial;padding:20px'>" +
-        "Google News నుంచి publisher URL పొందలేకపోయాం." +
-        "</h3>"
-      );
-    }
-
-    // Step 2: Fetch publisher HTML through our server.
-    const response = await axios.get(publisherUrl, {
-      timeout: 30000,
-      maxRedirects: 10,
-      responseType: "text",
+    const response = await axios.get(finalUrl, {
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-          "AppleWebKit/537.36 (KHTML, like Gecko) " +
-          "Chrome/154.0.0.0 Safari/537.36",
-        "Accept-Language": "ta-IN,ta;q=0.9,en;q=0.7"
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+        'Accept':
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'ta-IN,ta;q=0.9,en-US;q=0.8,en;q=0.7'
       },
-      validateStatus: s => s >= 200 && s < 500
+      timeout: 30000,
+      maxRedirects: 10
     });
 
-    const contentType = String(response.headers["content-type"] || "");
 
-    if (!contentType.includes("text/html")) {
-      return res.status(502).send(
-        "Publisher returned a non-HTML response."
-      );
-    }
+    let html = response.data;
 
-    const finalUrl =
-      response.request?.res?.responseUrl || publisherUrl;
 
-    const rewritten = rewriteHtml(response.data, finalUrl);
+    /* =========================
+       REMOVE IFRAME BLOCKING HEADERS
+    ========================= */
 
-    res.status(response.status);
-    res.set("Content-Type", "text/html; charset=utf-8");
-    res.set("Cache-Control", "no-store");
-    res.send(rewritten);
-
-  } catch (e) {
-    res.status(502).send(
-      `<html><body style="font-family:Arial;padding:20px">
-       <h3>వార్తను లోడ్ చేయలేకపోయాం</h3>
-       <p>${String(e.message).replace(/[<>&"]/g, "")}</p>
-       </body></html>`
+    html = html.replace(
+      /<meta[^>]+http-equiv=["']?X-Frame-Options["']?[^>]*>/gi,
+      ''
     );
+
+    html = html.replace(
+      /<meta[^>]+http-equiv=["']?Content-Security-Policy["']?[^>]*>/gi,
+      ''
+    );
+
+
+    /* =========================
+       ADD BASE URL
+    ========================= */
+
+    if (!/<base\s/i.test(html)) {
+
+      html = html.replace(
+        /<head([^>]*)>/i,
+        `<head$1><base href="${finalUrl}">`
+      );
+
+    }
+
+
+    /* =========================
+       REMOVE FRAME BLOCKING JS
+    ========================= */
+
+    html = html.replace(
+      /if\s*\(\s*window\.top\s*!==\s*window\.self\s*\)[\s\S]*?;/gi,
+      ''
+    );
+
+
+    res.setHeader(
+      'Content-Type',
+      'text/html; charset=utf-8'
+    );
+
+    res.setHeader(
+      'X-Frame-Options',
+      'ALLOWALL'
+    );
+
+    res.removeHeader('Content-Security-Policy');
+
+    return res.send(html);
+
+
+  } catch (err) {
+
+    console.error('Article Error:', err.message);
+
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (e) {}
+    }
+
+    return res.status(500).send(`
+      <html>
+      <body style="font-family:Arial;padding:30px;">
+      <h3>వార్తను తెరవలేకపోయాం</h3>
+      <p>${err.message}</p>
+      </body>
+      </html>
+    `);
   }
 });
 
-process.on("SIGTERM", async () => {
-  try {
-    if (browserPromise) {
-      const b = await browserPromise;
-      await b.close();
-    }
-  } finally {
-    process.exit(0);
-  }
-});
+
+/* =========================
+   SERVER
+========================= */
+
+const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
-  console.log("News iframe proxy running on port " + PORT);
+  console.log(`Server running on port ${PORT}`);
 });
